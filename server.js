@@ -3,7 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { OpenAI } = require('openai');
+const Groq = require('groq-sdk');
 require('dotenv').config();
 
 const app = express();
@@ -14,8 +14,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
 // Initialize OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+const openai = new Groq({
+  apiKey: process.env.GROQ_API_KEY
 });
 
 // Store scraped website content
