@@ -3,7 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { OpenAI } = require('openai');
+const Groq = require('groq-sdk');
 require('dotenv').config();
 
 const app = express();
@@ -14,8 +14,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
 // Initialize OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+const openai = new Groq({
+  apiKey: process.env.GROQ_API_KEY
 });
 
 // Store scraped website content
@@ -77,7 +77,7 @@ async function scrapeWebsite() {
 
       allContent += `\n\n--- Page: ${title} ---\n`;
       allContent += `Description: ${description}\n`;
-      allContent += mainContent.substring(0, 2000); // Limit to avoid too large content
+      allContent += mainContent.substring(0, 500); // Limit to avoid too large content
       
     } catch (error) {
       console.error(`Error scraping ${url}:`, error.message);
@@ -126,7 +126,7 @@ Website Content:
 ${websiteContent}`;
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: 'llama-3.3-70b-versatile',
       messages: [
         { 
           role: 'system', 
@@ -187,3 +187,9 @@ app.listen(PORT, () => {
   console.log(`RSCE Chatbot is running on port ${PORT}`);
   console.log(`Open http://localhost:${PORT} in your browser`);
 });
+
+
+
+
+
+
