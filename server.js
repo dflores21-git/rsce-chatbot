@@ -98,6 +98,7 @@ setInterval(scrapeWebsite, 24 * 60 * 60 * 1000);
 // Chat endpoint with OpenAI integration
 app.post('/api/chat', async (req, res) => {
   const userMessage = req.body.message;
+  const chatHistory = req.body.history || [];
 
   if (!userMessage || userMessage.trim() === '') {
     return res.json({
@@ -120,7 +121,7 @@ app.post('/api/chat', async (req, res) => {
     
 Based on the following website content, answer user questions accurately and helpfully. If the information is not in the provided content, say you don't have that specific information but suggest contacting RSCE directly.
 
-Keep responses concise (2-3 sentences max) and friendly.
+Keep responses concise (2-3 sentences max) and friendly. When relevant, include links to RSCE pages using markdown format [texto](url). Available pages: Socios: https://www.rsce.es/socios-abonados/ | Eventos: https://www.rsce.es/eventos-rsce/ | Razas: https://www.rsce.es/razas-espanolas/ | Tarifas: https://www.rsce.es/tarifas/ | Contacto: https://www.rsce.es/contacto-rsce/ | Criadores: https://www.rsce.es/criadores/ | Tramites: https://www.rsce.es/tramites-rsc/ | Salud: https://www.rsce.es/salud-y-bienestar-rsce/ | FAQ: https://www.rsce.es/faq/
 
 Website Content:
 ${websiteContent}`;
@@ -187,6 +188,9 @@ app.listen(PORT, () => {
   console.log(`RSCE Chatbot is running on port ${PORT}`);
   console.log(`Open http://localhost:${PORT} in your browser`);
 });
+
+
+
 
 
 

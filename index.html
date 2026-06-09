@@ -228,6 +228,7 @@
   <script>
     const API_URL = '/api/chat';
     let isWaitingForResponse = false;
+let chatHistory = [];
 
     async function sendMessage() {
       if (isWaitingForResponse) return;
@@ -252,7 +253,7 @@
         const response = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message })
+          body: JSON.stringify({ message, history: chatHistory })
         });
 
         const data = await response.json();
@@ -260,7 +261,9 @@
         // Remove typing indicator
         removeTypingIndicator(typingId);
         
-        addMessage(data.reply, 'bot-message');
+        chatHistory.push({ role: 'user', content: message });
+	chatHistory.push({ role: 'assistant', content: data.reply });
+	addMessage(data.reply, 'bot-message');
       } catch (error) {
         removeTypingIndicator(typingId);
         addMessage('Sorry, I encountered an error. Please try again.', 'bot-message');
@@ -277,7 +280,7 @@
       
       const contentEl = document.createElement('div');
       contentEl.className = 'message-content';
-      contentEl.textContent = text;
+      contentEl.innerHTML = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, '<a href="$2" target="_blank" style="color:#667eea;text-decoration:underline;">$1</a>');
       
       messageEl.appendChild(contentEl);
       messagesDiv.appendChild(messageEl);
