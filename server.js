@@ -3,197 +3,128 @@ const cors = require('cors');
 const path = require('path');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const Groq = require('groq-sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const CACHE_FILE = 'cache.json';
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// Initialize OpenAI
-const openai = new Groq({
-  apiKey: process.env.GROQ_API_KEY
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-// Store scraped website content
 let websiteContent = '';
 
-// URLs to scrape from RSCE website
 const RSCE_URLS = [
   'https://www.rsce.es/',
   'https://www.rsce.es/quienes-somos/',
-  'https://www.rsce.es/organigrama/',
   'https://www.rsce.es/socios-abonados/',
   'https://www.rsce.es/eventos-rsce/',
   'https://www.rsce.es/razas-espanolas/',
-  'https://www.rsce.es/morfologia/',
-  'https://www.rsce.es/agility/',
-  'https://www.rsce.es/igp/',
-  'https://www.rsce.es/obediencia/',
-  'https://www.rsce.es/busqueda-y-rescate/',
-  'https://www.rsce.es/rally-obediencia/',
-  'https://www.rsce.es/grooming/',
-  'https://www.rsce.es/salud-y-bienestar-rsce/',
-  'https://www.rsce.es/criadores/',
-  'https://www.rsce.es/criadores-premium/',
-  'https://www.rsce.es/servicios-rsce/',
-  'https://www.rsce.es/tramites-rsc/',
-  'https://www.rsce.es/afijos/',
-  'https://www.rsce.es/displasia/',
-  'https://www.rsce.es/certificados-de-pedigree/',
   'https://www.rsce.es/tarifas/',
   'https://www.rsce.es/contacto-rsce/',
-  'https://www.rsce.es/reglamentos_rsce/',
-  'https://www.rsce.es/area-de-formaciones/',
-  'https://www.rsce.es/noticias-rsce/',
-  'https://www.rsce.es/jueces-de-la-rsce/',
+  'https://www.rsce.es/tramites-rsc/',
+  'https://www.rsce.es/salud-y-bienestar-rsce/',
   'https://www.rsce.es/faq/',
+  'https://www.rsce.es/servicios-rsce/',
+  'https://www.rsce.es/criadores/',
 ];
 
-// Function to scrape website content
 async function scrapeWebsite() {
-  console.log('Starting to scrape RSCE website...');
+  console.log('Scraping RSCE...');
   let allContent = '';
-
   for (const url of RSCE_URLS) {
     try {
-      console.log(`Scraping: ${url}`);
       const response = await axios.get(url, {
         timeout: 10000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+        headers: { 'User-Agent': 'Mozilla/5.0' }
       });
-
       const $ = cheerio.load(response.data);
-      
-      // Extract main content
       const title = $('title').text();
       const mainContent = $('main').text() || $('body').text();
-      const description = $('meta[name="description"]').attr('content');
-
-      allContent += `\n\n--- Page: ${title} ---\n`;
-      allContent += `Description: ${description}\n`;
-      allContent += mainContent.substring(0, 500); // Limit to avoid too large content
-      
+      allContent += `\n\n--- ${title} (${url}) ---\n`;
+      allContent += mainContent.substring(0, 1500);
     } catch (error) {
       console.error(`Error scraping ${url}:`, error.message);
     }
   }
-
   websiteContent = allContent;
-  console.log(`Scraped content length: ${websiteContent.length} characters`);
-  return websiteContent;
+  fs.writeFileSync(CACHE_FILE, JSON.stringify({ content: allContent, date: Date.now() }));
+  console.log(`Scraping completo: ${websiteContent.length} caracteres`);
 }
 
-// Scrape website on startup
-scrapeWebsite().catch(err => console.error('Failed to scrape website:', err));
+function loadCache() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const cache = JSON.parse(fs.readFileSync(CACHE_FILE));
+      const age = Date.now() - cache.date;
+      if (age < 24 * 60 * 60 * 1000) {
+        websiteContent = cache.content;
+        console.log('Contenido cargado desde caché');
+        return true;
+      }
+    }
+  } catch (e) {}
+  return false;
+}
 
-// Re-scrape every 24 hours
+if (!loadCache()) {
+  scrapeWebsite().catch(console.error);
+}
 setInterval(scrapeWebsite, 24 * 60 * 60 * 1000);
 
-// Chat endpoint with OpenAI integration
 app.post('/api/chat', async (req, res) => {
   const userMessage = req.body.message;
   const chatHistory = req.body.history || [];
 
-  if (!userMessage || userMessage.trim() === '') {
-    return res.json({
-      reply: "Please ask me a question!",
-      confidence: "none"
-    });
+  if (!userMessage?.trim()) {
+    return res.json({ reply: '¡Por favor escribe una pregunta!' });
   }
 
-  // Check if we have website content
   if (!websiteContent) {
-    return res.json({
-      reply: "I'm still loading information from the RSCE website. Please try again in a moment.",
-      confidence: "low"
-    });
+    return res.json({ reply: 'Estoy cargando la información de la web. Por favor espera un momento.' });
   }
 
   try {
-    // Use OpenAI to find relevant information and generate response
-    const systemPrompt = `You are a helpful assistant for the RSCE (Real Sociedad Canina de España / Royal Canine Society of Spain) website. 
-    
-Based on the following website content, answer user questions accurately and helpfully. If the information is not in the provided content, say you don't have that specific information but suggest contacting RSCE directly.
+    const history = chatHistory.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
 
-Keep responses concise (2-3 sentences max) and friendly. When relevant, include links to RSCE pages using markdown format [texto](url). Available pages: Socios: https://www.rsce.es/socios-abonados/ | Eventos: https://www.rsce.es/eventos-rsce/ | Razas: https://www.rsce.es/razas-espanolas/ | Tarifas: https://www.rsce.es/tarifas/ | Contacto: https://www.rsce.es/contacto-rsce/ | Criadores: https://www.rsce.es/criadores/ | Tramites: https://www.rsce.es/tramites-rsc/ | Salud: https://www.rsce.es/salud-y-bienestar-rsce/ | FAQ: https://www.rsce.es/faq/
+    const chat = model.startChat({
+      history,
+      systemInstruction: `Eres el asistente virtual de la RSCE (Real Sociedad Canina de España).
+Responde siempre en español, de forma concisa (2-3 frases) y amable.
+Cuando sea relevante incluye enlaces a páginas de la RSCE en formato [texto](url).
+Si no tienes la información, sugiere contactar con la RSCE en https://www.rsce.es/contacto-rsce/
 
-Website Content:
-${websiteContent}`;
-
-    const completion = await openai.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [
-        { 
-          role: 'system', 
-          content: systemPrompt 
-        },
-        { 
-          role: 'user', 
-          content: userMessage 
-        }
-      ],
-      max_tokens: 200,
-      temperature: 0.7
+Contenido de la web:
+${websiteContent}`
     });
 
-    const reply = completion.choices[0].message.content;
+    const result = await chat.sendMessage(userMessage);
+    const reply = result.response.text();
 
-    res.json({
-      reply: reply,
-      confidence: "high",
-      source: "website-based"
-    });
-
+    res.json({ reply, confidence: 'high' });
   } catch (error) {
-    console.error('Error calling OpenAI:', error);
-    res.json({
-      reply: "I encountered an error. Please try again or contact us at support@rsce.es",
-      confidence: "low",
-      error: error.message
-    });
+    console.error('Error Gemini:', error);
+    res.json({ reply: 'Lo siento, ha ocurrido un error. Por favor inténtalo de nuevo.' });
   }
 });
 
-// Endpoint to manually trigger re-scraping
-app.post('/api/rescrape', async (req, res) => {
-  try {
-    await scrapeWebsite();
-    res.json({ message: "Website content refreshed successfully" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'running',
-    contentLoaded: websiteContent.length > 0,
-    contentSize: websiteContent.length
-  });
+  res.json({ status: 'running', contentLoaded: websiteContent.length > 0 });
 });
 
-// Serve the main page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(`RSCE Chatbot is running on port ${PORT}`);
-  console.log(`Open http://localhost:${PORT} in your browser`);
+  console.log(`RSCE Chatbot corriendo en puerto ${PORT}`);
 });
-
-
-
-
-
-
-
-
-
